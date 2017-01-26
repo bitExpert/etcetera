@@ -25,6 +25,11 @@ class GenericXmlReader extends AbstractFileReader
      */
     protected $rootNodeXPath;
 
+    /*
+     * @var int;
+     */
+    protected $maxDepth;
+    
     /**
      * AXmlReader constructor.
      */
@@ -32,6 +37,7 @@ class GenericXmlReader extends AbstractFileReader
     {
         parent::__construct();
         $this->rootNodeXPath = '//';
+        $this->maxDepth = 0;
     }
 
     /**
@@ -44,6 +50,15 @@ class GenericXmlReader extends AbstractFileReader
     }
 
     /**
+     * Sets the maximum depth to look for sub tags in file
+     * @param int $maxDepth
+     */
+    public function setMaxDepth(int $maxDepth)
+    {
+        $this->maxDepth = $maxDepth;
+    }
+
+    /**
      * @inheritdoc
      */
     public function read()
@@ -51,7 +66,7 @@ class GenericXmlReader extends AbstractFileReader
         $xml = simplexml_load_file($this->filename);
         $this->registerXPathNamespaces($xml);
 
-        if (0 !== $this->offset) {
+        if (0 !== (int)$this->offset) {
             throw new \InvalidArgumentException('Offset is not yet supported');
         }
 
@@ -63,20 +78,49 @@ class GenericXmlReader extends AbstractFileReader
 
             $node = json_decode(json_encode($node), true);
 
-            foreach ($node as $property => $value) {
-                //skip empty array values since they represent empty properties
-                if (is_array($value) && !count($value)) {
-                    continue;
-                }
-
-                $properties[$index] = $property;
-                $values[$index] = $value;
-                $index++;
-            }
-
+            $this->processSubTags($values, $properties, $index, $node);
 
             $properties = $this->describeProperties($properties);
+
             $this->processValues($properties, $values);
+        }
+    }
+
+    /**
+     * Iterates nodes and fills value and property arrays with found values and matching paths
+     *
+     * @param array  $values
+     * @param array  $properties
+     * @param int    $index
+     * @param array  $node
+     * @param int    $depth
+     * @param string $parent
+     */
+    protected function processSubTags(
+        array &$values,
+        array &$properties,
+        int &$index,
+        array $node,
+        int $depth = 0,
+        string $parent = ''
+    ) {
+        foreach ($node as $property => $value) {
+            //skip empty array values since they represent empty properties
+            // also skip if configured max depth is reached
+            if (is_array($value) && !count($value) || $depth > $this->maxDepth) {
+                continue;
+            }
+            //if value is an array the actual tag contains sub tags
+            //else value is the content of the actual tag
+            if (!is_array($value)) {
+                $properties[$index] = $parent . $property;
+                $values[$index] = $value;
+                $index++;
+            } else {
+                $NewParent = $parent . $property . '/';
+                $this->processSubTags($values, $properties, $index, $value, ++$depth, $NewParent);
+                $depth--;
+            }
         }
     }
 
